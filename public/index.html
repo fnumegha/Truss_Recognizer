@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+   <meta charset="UTF-8">
+   <title>Truss</title>
+   <script src="sketchRecTools.js"></script>
+   <script src="istraw.js"></script>
+</head>
+<body>
+   <p>Truss Recognizer</p>
+</body>
+<script>
+var contents = readJson("data.json");
+//global data
+var corners_array = [];
+var clean_corners_array = [];
+var strokes_corners = [];
+var corners = [];
+var cleanCorners = [];
+var resampleDistance;
+var classifiedTruss = 0;
+var originalTrussCount = 0;
+var originalNotTrussCount =0;
+var classifiedNotTruss = 0;
+var FinalTrussResultArray = [];
+var resampledSketchArray = [];
+var input;
+var TriPointsArray = [];
+var truss_90;
+var NonTruss_Truss = 0;
+var Truss_Truss = 0;
+var NonTruss_NonTruss = 0;
+var Truss_NonTruss = 0;
+var NOTclassifiedTruss = 0;
+
+for(var count=0;count<contents.length;count++) {
+	truss_90 = false;
+	refresh_buffers();
+	input = contents[count];
+	if(input.shapes) {
+		if(input.shapes[0]) {
+		if(input.shapes[0].interpretation =="truss")
+			{
+				originalTrussCount++;
+				truss_90 = true;
+			}
+		}
+	}
+	sketch = compact(input);
+	//console.log("The sketch----", sketch);
+	checkSketchForTruss(sketch);
+	if(count == contents.length-1) {
+		console.log("Total sketches provided in file = ",count);
+		console.log("Actual trusses = ",originalTrussCount);
+		console.log("Sketches Classified as Trusses = ", classifiedTruss);
+		originalNotTrussCount = count - originalTrussCount;
+		console.log("Actual Not trusses = ",originalNotTrussCount);	
+		classifiedNotTruss = count - classifiedTruss;
+		console.log("Sketches Classified as NotTrusses = ",NOTclassifiedTruss);
+		console.log("truss_truss = ",Truss_Truss);
+		console.log("NonTruss_Truss =",NonTruss_Truss);
+		console.log("nontruss_nontruss = ",NonTruss_NonTruss);
+		console.log("Truss_nonTruss =",Truss_NonTruss);
+
+		downloadResults(FinalTrussResultArray);
+	}
+}
+
+function downloadResults(results) {
+   var output = JSON.stringify(results);
+   var blob = new Blob([output], {type: "application/json"});
+   var url  = URL.createObjectURL(blob);  
+   var a = document.createElement('a');
+   a.href = url;
+   a.download = "data.json";
+   document.body.appendChild(a);
+   a.click();
+}
+
+
+function refresh_buffers(){
+	resampleDistance =0;
+	corners_array = [];
+	clean_corners_array = [];
+	strokes_corners = [];
+	corners = [];
+	cleanCorners = [];
+}	
+function checkSketchForTruss(sketch) {
+	var output = {'containsTruss': false, 'trussStrokeIds': [] };
+	var strokeIds = [];
+	var corners = [];
+	corners = displayCornerFindingIStraw(sketch);
+
+	// DO SOMETHING HERE TO FIND IF THERE IS A TRUSS AND WHAT STROKE IDS IT IS MADE FROM
+
+	output.trussStrokeIds = strokeIds;
+	//return output;
+}
+
+function linecorners(corners,resampledSketch,sketch){
+	var strokes_corners = [];
+	//////console.log("corners before cleaning ---- ", corners);
+	clean_corners = cleanCorners_fn(resampledSketch);
+	clean_corners.sort(dynamicSort("time"));
+
+	for(i=0;i<resampledSketch.strokes.length;i++){
+		var icorners = [];
+		for(j=0;j<clean_corners.length;j++){
+			var index = arrayObjectIndexOf(resampledSketch.strokes[i].points,clean_corners[j]);
+			if(index!=-1){
+				corners_t = clean_corners[j];
+				icorners.push({corners_t,index});
+			}
+		}
+		strokes_corners.push({i,icorners});
+	}
+	//console.log("These are stroke corners here : ",strokes_corners);
+	var line_corners = [];
+	line_corners = line_corners_fn(strokes_corners,line_corners,resampledSketch);
+	//console.log("this is our final line test result ---- ", line_corners);
+	var triangle_test_results = [];
+	TriangleArray = [];
+	TriangleArray = triangle_test(line_corners);
+	//console.log("Triangle Array : ", TriangleArray);
+
+	
+	trussArray = truss_test(TriangleArray);
+	//prepare results
+	var IndexCollect = [];
+	var TrussOrNot;
+	var StrokeArrayIds = [];
+	if(trussArray.length > 0) {
+		classifiedTruss++;
+		if(truss_90)
+		{
+			Truss_Truss++;
+		}
+		else
+		{
+			NonTruss_Truss++;
+		}
+		TrussOrNot = true;
+		for(q=0;q<trussArray.length;q++){
+			ind = trussArray[q].a.stroke_index;
+			if(!(compareIndex(ind,IndexCollect)))
+			{
+				IndexCollect.push(ind);
+			}
+			ind = trussArray[q].b.stroke_index;
+			if(!(compareIndex(ind,IndexCollect)))
+			{
+				IndexCollect.push(ind);
+			}
+			ind = trussArray[q].c.stroke_index;
+			if(!(compareIndex(ind,IndexCollect)))
+			{
+				IndexCollect.push(ind);
+			}
+		}
+		
+		for(j=0;j<IndexCollect.length;j++)
+		{
+			for(k=0;k<sketch.strokes.length;k++)
+			{
+				if(IndexCollect[j] === k && !(compareIds(k,StrokeArrayIds)))
+				{
+					StrokeArrayIds.push(sketch.strokes[k].id);
+				}
+			}
+		}
+		FinalTrussResultArray.push({TrussOrNot,StrokeArrayIds});
+	}
+	else
+	{	NOTclassifiedTruss++;
+		if(!truss_90)
+		{
+			NonTruss_NonTruss++;
+		}
+		else
+		{
+			Truss_NonTruss++;
+		}
+		TrussOrNot = false;
+		StrokeArrayIds = [];
+		FinalTrussResultArray.push({TrussOrNot,StrokeArrayIds});
+	}
+	return strokes_corners;
+}
+
+function GiveTriPoints(stroke,a,b){
+
+    for (var i = a; i < b+1; i++) 
+	{	
+	  if(!(tripointsdetect(TriPointsArray,stroke.points[i])))
+	  {
+		TriPointsArray.push(stroke.points[i]);
+	  }
+    }	
+}
+function tripointsdetect(arr,point){
+	for(i=0;i<arr.length;i++)
+	{
+		if(comparePoints(arr[i],point))
+		{return true;}
+	}
+	return false;
+}
+function compareIds(k, arr){
+	for(h=0;h<arr.length;h++)
+	{
+		if(k === arr[h])
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+function compareIndex(ind, indexarray){
+	for(i=0;i<indexarray.length;i++)
+	{
+		if(indexarray[i] === ind)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+function truss_test(TriangleArray) {
+	var possibleTrusses = [];
+	var possibleTruss = {};
+	for(i=0;i<TriangleArray.length;i++){
+		for(j=0;j<TriangleArray.length;j++){
+			if(i!=j) {
+				if(checkEquality(TriangleArray[i],TriangleArray[j]))
+					{
+					if(arrayObjectIndexOfTriangle(possibleTrusses, TriangleArray[i]) == -1)
+					{
+						possibleTrusses.push(TriangleArray[i]);
+					}
+					//j
+					if(arrayObjectIndexOfTriangle(possibleTrusses, TriangleArray[j]) == -1)
+					{
+						possibleTrusses.push(TriangleArray[j]);
+					}
+					
+					}
+				}
+			}
+		}
+//console.log("Possible trusses : ", possibleTrusses);
+return possibleTrusses;
+}
+
+function arrayObjectIndexOfTriangle(mytru, searchTerm) {
+    for(var i = 0; i < mytru.length; i++) {
+		if(mytru[i]){
+        if (((mytru[i].a.starting_corner.corners_t.x === searchTerm.a.starting_corner.corners_t.x) && (mytru[i].a.starting_corner.corners_t.y === searchTerm.a.starting_corner.corners_t.y) && (mytru[i].a.starting_corner.corners_t.time === searchTerm.a.starting_corner.corners_t.time))
+			&&((mytru[i].b.starting_corner.corners_t.x === searchTerm.b.starting_corner.corners_t.x) && (mytru[i].b.starting_corner.corners_t.y === searchTerm.b.starting_corner.corners_t.y) && (mytru[i].b.starting_corner.corners_t.time === searchTerm.b.starting_corner.corners_t.time))
+			&& ((mytru[i].c.starting_corner.corners_t.x === searchTerm.c.starting_corner.corners_t.x) && (mytru[i].c.starting_corner.corners_t.y === searchTerm.c.starting_corner.corners_t.y) && (mytru[i].c.starting_corner.corners_t.time === searchTerm.c.starting_corner.corners_t.time))) 
+		return i;
+		}
+	}
+    return -1;
+}	
+
+
+function checkEquality(elementA, elementB) {
+	if(((elementA.pointa.x == elementB.pointa.x) && (elementA.pointa.y == elementB.pointa.y)) || 
+	((elementA.pointb.x == elementB.pointb.x) && (elementA.pointb.y == elementB.pointb.y)) ||
+	((elementA.pointc.x == elementB.pointc.x) && (elementA.pointc.y == elementB.pointc.y)) ||
+	((elementA.pointa.x == elementB.pointb.x) && (elementA.pointa.y == elementB.pointb.y)) ||
+	((elementA.pointa.x == elementB.pointc.x) && (elementA.pointa.y == elementB.pointc.y)) ||
+	((elementA.pointb.x == elementB.pointa.x) && (elementA.pointb.y == elementB.pointa.y)) ||
+	((elementA.pointb.x == elementB.pointc.x) && (elementA.pointb.y == elementB.pointc.y)) ||
+	((elementA.pointc.x == elementB.pointa.x) && (elementA.pointc.y == elementB.pointa.y)) ||
+	((elementA.pointc.x == elementB.pointb.x) && (elementA.pointc.y == elementB.pointb.y)))
+		return true;
+	else
+		return false; 
+}
+
+function comparePoints(p0,p1) {
+	if(p0.x === p1.x && p0.y === p1.y && p0.time === p1.time)
+		return true;
+	else
+		return false;
+}
+
+function triangle_test(line_corners){
+	var triangle = [];
+	var possibleVertices = [];
+	var possibleTrianglesArray = [];
+	var possibleTriangle = {};
+
+	for(i=0;i<line_corners.length;i++){
+		if(line_corners[i].linevalue) {
+		for(j=0;j<line_corners.length;j++){
+			if(line_corners[j].linevalue) {
+			if(comparePoints(line_corners[i].starting_corner.corners_t,line_corners[j].starting_corner.corners_t))
+			{
+				d = line_corners[i].ending_corner.corners_t;
+				f = line_corners[j].ending_corner.corners_t;
+				for(k=0;k<line_corners.length;k++){
+					if(line_corners[k].linevalue)
+					{
+						if((comparePoints(line_corners[k].starting_corner.corners_t,d) && comparePoints(line_corners[k].ending_corner.corners_t,f)) ||
+						(comparePoints(line_corners[k].ending_corner.corners_t,d) && comparePoints(line_corners[k].starting_corner.corners_t,f)))
+						{
+							a=line_corners[i];
+							b=line_corners[j];
+							c=line_corners[k];
+							possibleTriangle = {a,b,c};
+							possibleTrianglesArray.push(possibleTriangle);							
+						}
+					}
+				}
+			}
+			if(comparePoints(line_corners[i].starting_corner.corners_t,line_corners[j].ending_corner.corners_t))
+			{		
+				d = line_corners[i].ending_corner.corners_t;
+				f = line_corners[j].starting_corner.corners_t;
+				for(k=0;k<line_corners.length;k++){
+					if(line_corners[k].linevalue)
+					{
+						if((comparePoints(line_corners[k].starting_corner.corners_t,d) && comparePoints(line_corners[k].ending_corner.corners_t,f)) ||
+						(comparePoints(line_corners[k].ending_corner.corners_t,d) && comparePoints(line_corners[k].starting_corner.corners_t,f)))
+						{
+							a=line_corners[i];
+							b=line_corners[j];
+							c=line_corners[k];
+							possibleTriangle = {a,b,c};
+							possibleTrianglesArray.push(possibleTriangle);							
+						}
+					}
+				}
+			}
+			if(comparePoints(line_corners[i].ending_corner.corners_t,line_corners[j].starting_corner.corners_t))
+			{		
+				d = line_corners[i].starting_corner.corners_t;
+				f = line_corners[j].ending_corner.corners_t;
+				for(k=0;k<line_corners.length;k++){
+					if(line_corners[k].linevalue)
+					{
+						if((comparePoints(line_corners[k].starting_corner.corners_t,d) && comparePoints(line_corners[k].ending_corner.corners_t,f)) ||
+						(comparePoints(line_corners[k].ending_corner.corners_t,d) && comparePoints(line_corners[k].starting_corner.corners_t,f)))
+						{
+							a=line_corners[i];
+							b=line_corners[j];
+							c=line_corners[k];
+							possibleTriangle = {a,b,c};
+							possibleTrianglesArray.push(possibleTriangle);							
+						}
+					}
+				}
+			}
+			if(comparePoints(line_corners[i].ending_corner.corners_t,line_corners[j].ending_corner.corners_t))
+			{		
+				d = line_corners[i].starting_corner.corners_t;
+				f = line_corners[j].starting_corner.corners_t;
+				for(k=0;k<line_corners.length;k++){
+					if(line_corners[k].linevalue)
+					{
+						if((comparePoints(line_corners[k].starting_corner.corners_t,d) && comparePoints(line_corners[k].ending_corner.corners_t,f)) ||
+						(comparePoints(line_corners[k].ending_corner.corners_t,d) && comparePoints(line_corners[k].starting_corner.corners_t,f)))
+						{
+							a=line_corners[i];
+							b=line_corners[j];
+							c=line_corners[k];
+							possibleTriangle = {a,b,c};
+							possibleTrianglesArray.push(possibleTriangle);							
+						}
+					}
+				}
+			}	
+			
+		}
+	}
+	}
+	}
+	
+	//console.log("Array of possible triangles -> ",possibleTrianglesArray);
+	
+	SurelyTriangle = {};
+	TriangleArray = [];
+	for(m=0;m<possibleTrianglesArray.length;m++)
+	{	
+		//////console.log("distance array calc  ",possibleTrianglesArray[m].starting_corner,possibleTrianglesArray[m].ending_corner);
+		a_len =distance(possibleTrianglesArray[m].a.starting_corner.corners_t,possibleTrianglesArray[m].a.ending_corner.corners_t);
+
+		//b
+		b_len =distance(possibleTrianglesArray[m].b.starting_corner.corners_t,possibleTrianglesArray[m].b.ending_corner.corners_t);
+
+		//c
+		c_len =distance(possibleTrianglesArray[m].c.starting_corner.corners_t,possibleTrianglesArray[m].c.ending_corner.corners_t);
+
+		if( ((a_len + b_len)> c_len) && ((a_len + c_len)> b_len) && ((b_len + c_len)> a_len))
+		{
+			pointa = possibleTrianglesArray[m].a.starting_corner.corners_t;
+			pointb = possibleTrianglesArray[m].a.ending_corner.corners_t;
+			pointc = checkForThirdPoint(possibleTrianglesArray[m].a, possibleTrianglesArray[m].b);
+			a = possibleTrianglesArray[m].a;
+			b = possibleTrianglesArray[m].b;
+			c = possibleTrianglesArray[m].c;
+			SurelyTriangle = {a,b,c,pointa,pointb,pointc};
+			TriangleArray.push(SurelyTriangle);
+		}
+		
+	}
+	//console.log("TriangleArray : ",TriangleArray);
+
+	return TriangleArray;
+}
+
+function checkForThirdPoint(line1, line2) {
+	if((line1.starting_corner.corners_t.x == line2.starting_corner.corners_t.x) && (line1.starting_corner.corners_t.y == line2.starting_corner.corners_t.y))
+		return line2.ending_corner.corners_t;
+	else 
+		return line2.starting_corner.corners_t;
+}
+
+<!-- function possibletrianglearrayJudge(pta_m,a,b,c){ -->
+
+<!-- result = 	((pta_m.a.starting_corner === a.starting_corner && pta_m.a.ending_corner === a.ending_corner) && -->
+	<!-- (pta_m.b.starting_corner === b.starting_corner && pta_m.b.ending_corner === b.ending_corner) && -->
+	<!-- (pta_m.c.starting_corner === c.starting_corner && pta_m.c.ending_corner === c.ending_corner )); -->
+<!-- return result; -->
+	<!-- } -->
+function findIfArrayIncludes(originalArray, element){
+	var len = (originalArray.filter(function(cornerInclude){ 
+				return (cornerInclude.x === element.x && cornerInclude.y === element.y && cornerInclude.time === element.time ) })).length;
+	return len;
+}
+
+function arrayObjectIndexOf(myArray, searchTerm) {
+    for(var i = 0; i < myArray.length; i++) {
+		if(myArray[i]){
+        if (myArray[i].x === searchTerm.x && myArray[i].y === searchTerm.y && myArray[i].time === searchTerm.time) return i;
+		}
+	}
+    return -1;
+}
+
+function cleanCorners_fn(resampledSketch){
+	var distance;
+	var overlap =0;
+	
+	length_of_corner = corners.length;
+	for(i=0;i<length_of_corner;i++){ 
+		if(corners[i])
+		{
+		
+		for(j=i+1;j<length_of_corner;j++){
+			if(corners[j])
+			{
+			distance = this.distance(corners[i],corners[j]);
+			//////console.log("Resample Distance *2: ", 2*resampleDistance);
+			//////console.log("Distance : ", distance);
+			if(distance < 5) 
+			{
+				
+				overlap++;
+				var ind = arrayObjectIndexOf(cleanCorners, corners[j]);
+				cleanCorners.splice(ind,1);
+				
+				for(t=0;t<resampledSketch.strokes.length;t++)
+				{
+					index = arrayObjectIndexOf(resampledSketch.strokes[t].points,corners[j]);
+					if(index!=-1)
+					{
+						resampledSketch.strokes[t].points[index] = corners[i];
+						
+						break;
+					}					
+				}
+			}
+			}
+		}
+		}
+
+	}
+	
+	//console.log("number of overlapping corners ---- ", overlap);
+	//console.log("original istraw corners --- ",corners);
+
+	var cleanfinalCorners = [];
+	for(u=0;u<cleanCorners.length;u++){
+	if(cleanCorners[u])
+		{
+				cleanfinalCorners.push(cleanCorners[u]);
+		}
+	}
+		//console.log("clean final corners ---- ",cleanfinalCorners);
+	return cleanfinalCorners;
+}
+
+
+
+function line_corners_fn(strokes_corners,line_corners,resampledSketch){
+	var threshold = 0.7;
+	var linevalue;
+	line_corners = [];
+	for(i=0;i<strokes_corners.length;i++)//for the entire stroke_corners array
+	{	
+		for(j=0;j<strokes_corners[i].icorners.length;j++)//iterate through every corner
+		{	
+			for(k=j+1;k<strokes_corners[i].icorners.length;k++)
+			{
+			 stroke_index = strokes_corners[i].i;
+			 starting_corner_index = strokes_corners[i].icorners[j].index;
+			 starting_corner = strokes_corners[i].icorners[j];
+			 ending_corner_index = strokes_corners[i].icorners[k].index;
+			 ending_corner = strokes_corners[i].icorners[k];
+			r = resampledSketch.strokes[stroke_index];
+			linevalue = lineTest(resampledSketch.strokes[stroke_index],starting_corner_index,ending_corner_index,threshold);
+			line_corners.push({stroke_index,starting_corner_index,starting_corner,ending_corner_index,ending_corner,linevalue});
+			}
+		}
+	}
+
+	return line_corners;
+}
+
+function lineTest(stroke,a,b, threshold){
+
+    var distance = this.distance(stroke.points[a], stroke.points[b]);
+    var pathDistance = this.pathDistance(stroke, a, b);
+    return (distance / pathDistance) > threshold;
+}
+
+  function pathDistance(stroke, a, b) {
+    var d = 0;
+    for (var i = a; i < b; i++) {
+		
+      d += this.distance(stroke.points[i], stroke.points[i + 1]);
+    }
+    return d;
+  }
+
+  function distance(p0, p1) {
+
+    var deltaX = p1.x - p0.x;
+    var deltaY = p1.y - p0.y;
+    return Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+  }
+
+
+function dynamicSort(property) {
+    var sortOrder = 1;
+    if(property[0] === "-") {
+        sortOrder = -1;
+        property = property.substr(1);
+    }
+    return function (a,b) {
+        var result = (a[property] < b[property]) ? -1 : (a[property] > b[property]) ? 1 : 0;
+        return result * sortOrder;
+    }
+}
+
+function compact(input) {
+	var sketch = {};
+	sketch.id = input.id;
+	sketch.strokes = input.strokes;
+	sketch.time = input.time;
+	return sketch; 
+}
+
+function readJson(fileName) {
+   var contents;
+   var xhttp = new XMLHttpRequest();
+   xhttp.onreadystatechange = function() {
+      if (this.readyState === 4 && this.status === 200) {
+         contents = JSON.parse(this.response);
+	}
+   };
+   xhttp.open("GET", fileName, false);
+   xhttp.send();
+   return contents;
+}
+
+
+
+function displayCornerFindingIStraw(sketch) {
+// get the resampled sketch and its corner indices
+
+	
+	if(sketch)
+	{
+		resampleDistance = SketchRecTools.determineResampleSpacing(sketch);
+		var resampledSketch = SketchRecTools.resampleByDistance(sketch);
+		//console.log("resampled sketch : ",resampledSketch);
+		var sketchCornerIndices = IStraw.run(resampledSketch);
+
+		// gather the corners from their indices
+
+		for (var i = 0; i < resampledSketch.strokes.length; i++) {
+			var resampledPoints = resampledSketch.strokes[i].points;
+			var strokeCornerIndices = sketchCornerIndices[i];
+			for (var j = 0; j < strokeCornerIndices.length; j++) {
+				corners.push(resampledPoints[strokeCornerIndices[j]]);
+				cleanCorners.push(resampledPoints[strokeCornerIndices[j]]);
+			}
+		}
+		
+		
+	strokes_corners = linecorners(corners,resampledSketch,sketch);
+	}
+	
+
+	return corners;
+}
+
+</script>
+
+</html>
+
